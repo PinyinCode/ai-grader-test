@@ -1,0 +1,106 @@
+name: Test AI Grader
+
+on:
+  workflow_dispatch:  # Chỉ chạy khi bấm nút
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install flask flask-cors groq
+
+      - name: Create test script
+        run: |
+          cat > ai_grader.py << 'EOF'
+          # (nội dung ai_grader.py bạn dán vào đây)
+          EOF
+
+      - name: Start Flask
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          ADMIN_API_KEY: test123
+        run: |
+          nohup python ai_grader.py > flask.log 2>&1 &
+          sleep 5
+          curl http://localhost:5000/health || (cat flask.log; exit 1)
+
+      - name: Test - Chấm điểm đúng
+        run: |
+          echo "=== TEST 1: Câu đúng hoàn toàn ==="
+          curl -sS -X POST http://localhost:5000/api/ai-grade \
+            -H "Content-Type: application/json" \
+            -d '{
+              "user_answer": "我吃饭了",
+              "correct_answer": "我吃饭了",
+              "vietnamese": "Tôi ăn cơm rồi",
+              "user_email": "test@example.com",
+              "user_tier": "admin"
+            }' | tee test1.json
+          echo ""
+
+      - name: Test - Chấm điểm sai
+        run: |
+          echo "=== TEST 2: Câu sai ==="
+          curl -sS -X POST http://localhost:5000/api/ai-grade \
+            -H "Content-Type: application/json" \
+            -d '{
+              "user_answer": "我喝水",
+              "correct_answer": "我吃饭了",
+              "vietnamese": "Tôi ăn cơm rồi",
+              "user_email": "test@example.com",
+              "user_tier": "admin"
+            }' | tee test2.json
+          echo ""
+
+      - name: Test - Chấm điểm gần đúng
+        run: |
+          echo "=== TEST 3: Gần đúng ==="
+          curl -sS -X POST http://localhost:5000/api/ai-grade \
+            -H "Content-Type: application/json" \
+            -d '{
+              "user_answer": "我吃饭",
+              "correct_answer": "我吃饭了",
+              "vietnamese": "Tôi ăn cơm rồi",
+              "user_email": "test@example.com",
+              "user_tier": "admin"
+            }' | tee test3.json
+          echo ""
+
+      - name: Test - Check quota
+        run: |
+          echo "=== TEST 4: Check quota ==="
+          curl -sS -X POST http://localhost:5000/api/ai-quota \
+            -H "Content-Type: application/json" \
+            -d '{"user_email": "test@example.com", "user_tier": "demo"}'
+          echo ""
+
+      - name: Test - Admin cấp quota
+        run: |
+          echo "=== TEST 5: Admin cấp quota ==="
+          curl -sS -X POST http://localhost:5000/api/ai-quota/bonus \
+            -H "Content-Type: application/json" \
+            -d '{
+              "admin_key": "test123",
+              "user_email": "test@example.com",
+              "action": "add",
+              "amount": 5000,
+              "note": "Test cấp quota"
+            }'
+          echo ""
+
+      - name: Show Flask log
+        if: always()
+        run: |
+          echo "=== FLASK LOG ==="
+          cat flask.log
